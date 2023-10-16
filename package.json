@@ -1,0 +1,13 @@
+{
+  "type": "module",
+  "dependencies": {
+    "chokidar": "^3.5.3"
+  },
+  "devDependencies": {
+    "eslint": "^8.51.0"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "lint": "eslint ."
+  }
+}

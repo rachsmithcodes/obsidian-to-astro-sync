@@ -84,10 +84,12 @@ function processNote(note) {
     });
   }
 
-  note.content = note.content.replace(
-    /file:\/\/\/Users\/rachsmith\/Obsidian\/vault/g,
-    ""
-  );
+  // replace images with file:// src with relative src
+  if (config.replaceFileSystemImageSrc) {
+    const fileRegex = new RegExp(`file://${config.vaultPath}`, "g");
+    note.content = note.content.replace(fileRegex, "");
+  }
+
   return note;
 }
 

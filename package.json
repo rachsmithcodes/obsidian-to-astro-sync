@@ -1,13 +1,14 @@
 {
   "type": "module",
   "dependencies": {
-    "chokidar": "^3.5.3"
+    "chokidar": "^3.5.3",
+    "gray-matter": "^4.0.3"
   },
   "devDependencies": {
     "eslint": "^8.51.0"
   },
   "scripts": {
-    "start": "node index.js",
+    "sync": "node index.js",
     "lint": "eslint ."
   }
 }

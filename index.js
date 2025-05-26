@@ -1,56 +1,29 @@
 import { promises as fsp } from "fs";
 import chokidar from "chokidar";
 import config from "./config.js";
+import matter from "gray-matter";
 
 /**
  * Notes
  */
 let allNotes = {};
 
-async function getNote(fileName) {
-  const noteContent = await fsp.readFile(
-    config.vaultNotesPath + "/" + fileName,
-    "utf-8"
+function getNote(fileName) {
+  const fileWithFrontmatter = matter.read(
+    config.vaultNotesPath + "/" + fileName
   );
-
-  if (noteContent.indexOf("---") != 0) return null;
-
-  const frontmatterText = noteContent.split("---")[1];
-  // convert frontmatter to object
-  const frontmatter = frontMatterToObject(frontmatterText);
-
-  if (!frontmatter.slug) return null;
-  if (!frontmatter.publish) return null;
 
   return {
     fileName,
     vaultTitle: fileName.split(".md")[0],
-    slug: frontmatter.slug,
-    content: noteContent,
+    file: fileWithFrontmatter,
   };
-}
-
-function frontMatterToObject(frontmatterText) {
-  return frontmatterText.split("\n").reduce((object, line) => {
-    const [key, value] = line.split(":");
-    if (key && value) {
-      // some yaml strings are quoted
-      if (value.trim().indexOf('"') == 0) {
-        object[key.trim()] = value.trim().slice(1, -1);
-      } else {
-        object[key.trim()] = value.trim();
-      }
-    }
-    return object;
-  }, {});
 }
 
 async function readNotes() {
   let noteFileNames = await fsp.readdir(config.vaultNotesPath);
   noteFileNames = noteFileNames.filter((fileName) => fileName.endsWith(".md"));
-  let notes = await Promise.all(
-    noteFileNames.map((noteFileName) => getNote(noteFileName))
-  );
+  let notes = noteFileNames.map((noteFileName) => getNote(noteFileName));
   // filter out null values
   notes = notes.filter((note) => note);
   for (const note of notes) {
@@ -58,11 +31,31 @@ async function readNotes() {
   }
 }
 
+async function cleanUpNotes() {
+  // remove all files in the astro notes path that are not in the published notes path
+  const astroNotes = await fsp.readdir(config.astroNotesPath);
+  const publishedNotes = await fsp.readdir(config.vaultNotesPath);
+  const publishedNotesSlugs = publishedNotes.map(
+    (note) => matter.read(config.vaultNotesPath + "/" + note).data.slug
+  );
+  const notesToRemove = astroNotes.filter((note) => {
+    const noteSlug = matter.read(config.astroNotesPath + "/" + note).data.slug;
+    return !publishedNotesSlugs.includes(noteSlug);
+  });
+  await Promise.all(
+    notesToRemove.map((note) => fsp.unlink(config.astroNotesPath + "/" + note))
+  );
+}
+
 const linksRegex = /\[\[(.+?)\]\]/g;
 
 function processNote(note) {
+  // update frontmatter - site_tags to tags
+  note.file.data.tags = note.file.data.site_tags;
+  delete note.file.data.site_tags;
+
   // check for wikilinks
-  const matches = note.content.match(linksRegex);
+  const matches = note.file.content.match(linksRegex);
   if (matches) {
     matches.forEach((match) => {
       const link = match.slice(2, -2);
@@ -73,13 +66,13 @@ function processNote(note) {
       );
       // if there is a linked note, replace with markdown link
       if (linkedNote) {
-        note.content = note.content.replace(
+        note.file.content = note.file.content.replace(
           match,
-          `[${linkText}](/${linkedNote.slug}/)`
+          `[${linkText}](/${linkedNote.file.data.slug}/)`
         );
       } else {
         // if there is no linked note, remove wikilink
-        note.content = note.content.replace(match, linkText);
+        note.file.content = note.file.content.replace(match, linkText);
       }
     });
   }
@@ -87,7 +80,7 @@ function processNote(note) {
   // replace images with file:// src with relative src
   if (config.replaceFileSystemImageSrc) {
     const fileRegex = new RegExp(`file://${config.vaultPath}`, "g");
-    note.content = note.content.replace(fileRegex, "");
+    note.file.content = note.file.content.replace(fileRegex, "");
   }
 
   return note;
@@ -97,11 +90,13 @@ function writeNote(note) {
   if (!note) {
     console.log(note);
   }
-  console.log(`Writing ${note.fileName}...`);
   const processedNote = processNote(note);
+  console.log(
+    `Writing ${note.fileName} to ${processedNote.file.data.slug}.md...`
+  );
   return fsp.writeFile(
-    config.astroNotesPath + "/" + processedNote.slug + ".md",
-    processedNote.content
+    config.astroNotesPath + "/" + processedNote.file.data.slug + ".md",
+    matter.stringify(processedNote.file)
   );
 }
 
@@ -123,7 +118,9 @@ async function copyImages() {
 }
 
 function isImageInNoteContent(image) {
-  return Object.values(allNotes).some((note) => note.content.includes(image));
+  return Object.values(allNotes).some((note) =>
+    note.file.content.includes(image)
+  );
 }
 
 async function copyImage(image) {
@@ -159,4 +156,4 @@ function startWatcher() {
 }
 
 // Read all notes, copy all images, start the watcher
-readNotes().then(copyImages).then(startWatcher);
+readNotes().then(cleanUpNotes).then(copyImages).then(startWatcher);
